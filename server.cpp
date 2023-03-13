@@ -10,45 +10,50 @@ Server::Server(QObject *parent)
     rest->route("/api/members",QHttpServerRequest::Method::Get,[this, &m_requestHandler](const QHttpServerRequest &request){
         return QtConcurrent::run([this,&m_requestHandler, &request] () {
             if(m_requestHandler.checkRequest(request)){
-                return makeResponse(apiNums::getMembers,QString("Ok"));
+                return makeResponse(apiNums::getMembers,QString("Success"));
             }
             else{
                 return makeResponse(apiNums::getMembers,QString("Error"));
             }
         });
     });
-
+    const auto[x,y]=std::make_pair(1,2);
+    qDebug() << x;
     rest->route("/api/setNick",QHttpServerRequest::Method::Post,[this,&m_requestHandler](const QHttpServerRequest &request){
         return QtConcurrent::run([this,&m_requestHandler, &request] () {
             if(m_requestHandler.checkRequest(request)){
                 QString currentNick=m_requestHandler.parseRequest(request);
                 for(auto it=clients.begin();it!=clients.end();++it){
                     if(it.value()==currentNick){
-                        return makeResponse(apiNums::getMembers,QString("Error"));
+                        return makeResponse(apiNums::postNick,QString("NickAlreadyExist"));
                     }
                 }
                 clients.insert(request.remoteAddress(),currentNick);
-                return makeResponse(apiNums::getMembers,QString("Ok"));
+                return makeResponse(apiNums::postNick,QString("Success"));
             }
-            else{
-                return makeResponse(apiNums::getMembers,QString("Error"));
+            else {
+                return makeResponse(apiNums::postNick,QString("Error"));
             }
         });
     });
 
-    /*rest->route("api/getCompanion",[this](QWebSocket sender){
-        auto companion=findCompanion();
-        if(companion!=clients.end()){
-            QHttpServerResponse response(companion.value(),QHttpServerResponse::StatusCode::Ok);
-            response.setHeader("Access-Control-Allow-Origin","*");
-            return response;
-        }
-        else{
-            QHttpServerResponse response(QString("NoCompanionFound"),QHttpServerResponse::StatusCode::Ok);
-            response.setHeader("Access-Control-Allow-Origin","*");
-            return response;
-        }
-    });*/
+    rest->route("/api/getCompanion",QHttpServerRequest::Method::Post,[this, &m_requestHandler](const QHttpServerRequest &request){
+        return QtConcurrent::run([this,&m_requestHandler, &request] () {
+            if(m_requestHandler.checkRequest(request)){
+                QString currentNick=m_requestHandler.parseRequest(request);
+                freeUsers.push_back(currentNick);
+                auto companion=findCompanion();
+                if(companion!=freeUsers.end()){
+                    return makeResponse(apiNums::getCompanion,*companion);
+                }
+                else{
+                    return makeResponse(apiNums::getCompanion,QString("NoCompanion"));
+                }
+            }
+            else{
+                return makeResponse(apiNums::getCompanion,QString("Error")); }
+        });
+    });
 
     if(this->listen(QHostAddress::Any,2323)){
         qDebug() << "Server started";
@@ -64,10 +69,10 @@ companionPos Server::findCompanion()
     QRandomGenerator *rg = QRandomGenerator::global();
     if(freeUsers.size()!=0){
         qint64 clientNum = rg->bounded(0, freeUsers.size());
-        return std::next(clients.begin(),clientNum);
+        return freeUsers.begin()+clientNum;
     }
     else{
-        return clients.end();
+        return freeUsers.end();
     }
 }
 
@@ -94,7 +99,7 @@ void Server::textMessageReceived(const QString &message)
 QHttpServerResponse Server::makeResponse(qint16 apiNum,QString result)
 {
     if(apiNum==apiNums::getMembers){
-        if(result=="Ok"){
+        if(result=="Success"){
             QHttpServerResponse response(QString(QString::number(membersCounter)),QHttpServerResponse::StatusCode::Ok);
             response.setHeader("Access-Control-Allow-Origin","*");
             return response;
@@ -106,13 +111,30 @@ QHttpServerResponse Server::makeResponse(qint16 apiNum,QString result)
         }
     }
     if(apiNum==apiNums::postNick){
-        if(result=="Ok"){
-            QHttpServerResponse response(QString("Success"),QHttpServerResponse::StatusCode::Ok);
+        if(result=="Success"){
+            QHttpServerResponse response(QString("true"),QHttpServerResponse::StatusCode::Ok);
+            response.setHeader("Access-Control-Allow-Origin","*");
+            return response;
+        }
+        else if(result=="NickAlreadyExist"){
+            QHttpServerResponse response(QString("false"),QHttpServerResponse::StatusCode::Ok);
             response.setHeader("Access-Control-Allow-Origin","*");
             return response;
         }
         else{
             QHttpServerResponse response(QString("Error"),QHttpServerResponse::StatusCode::BadRequest);
+            response.setHeader("Access-Control-Allow-Origin","*");
+            return response;
+        }
+    }
+    if(apiNum==apiNums::getCompanion){
+        if(result=="Error"){
+            QHttpServerResponse response(QString("Error"),QHttpServerResponse::StatusCode::BadRequest);
+            response.setHeader("Access-Control-Allow-Origin","*");
+            return response;
+        }
+        else{
+            QHttpServerResponse response(result,QHttpServerResponse::StatusCode::Ok);
             response.setHeader("Access-Control-Allow-Origin","*");
             return response;
         }

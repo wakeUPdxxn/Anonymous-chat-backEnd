@@ -10,7 +10,7 @@
 #include <QRandomGenerator>
 #include <QtConcurrent>
 
-using companionPos = QHash<QHostAddress,QString>::Iterator;
+using companionPos = QVector<QString>::Iterator;
 
 class Server:public QWebSocketServer
 {
@@ -32,7 +32,7 @@ private:
     QHash<QHostAddress,QWebSocket*> clientsNetworkData;
     QHash<QHostAddress,QString>clients;
     QNetworkAccessManager *m_networkAccessManager;
-    QSet<QString>freeUsers;
+    QVector<QString>freeUsers;
     size_t membersCounter=0;
     QHttpServerResponse makeResponse(qint16 apiNum, QString result);
 };
