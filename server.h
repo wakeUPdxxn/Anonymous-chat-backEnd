@@ -1,5 +1,5 @@
 #pragma once
-#include <QObject>
+#include "client.h"
 #include <QNetworkAccessManager>
 #include <QWebSocket>
 #include <QHttpServer>
@@ -9,16 +9,18 @@
 #include <QJsonArray>
 #include <QRandomGenerator>
 #include <QtConcurrent>
+#include <requesthandler.h>
 
-using companionPos = QVector<QString>::Iterator;
+using CompanionPos = QList<Client*>::Iterator;
 
 class Server:public QWebSocketServer
 {
 public:
     explicit Server(QObject *parent = nullptr);
-    companionPos findCompanion();
+    CompanionPos findCompanion();
+    ~Server();
 public slots:
-    void newClient();
+    void onNewClient();
     void disconnectedEvent();
     void textMessageReceived(const QString &message);
 private:
@@ -26,14 +28,18 @@ private:
         getMembers = 1,
         getCompanion = 2,
         postNick = 3,
+        putInQueue = 4,
     };
+    Client *сlient;
     QHttpServer *rest;
     QWebSocket *socket;
-    QHash<QHostAddress,QWebSocket*> clientsNetworkData;
-    QHash<QHostAddress,QString>clients;
+    QHash<QHostAddress,Client*>clients;
+    QVector<QHash<QWebSocket*,QWebSocket*>>currentDialogs;
     QNetworkAccessManager *m_networkAccessManager;
-    QVector<QString>freeUsers;
+    QList<Client*>freeUsers;
+    QList<Client*>beasyUsers;
     size_t membersCounter=0;
+    QRandomGenerator *rg;
     QHttpServerResponse makeResponse(qint16 apiNum, QString result);
 };
 

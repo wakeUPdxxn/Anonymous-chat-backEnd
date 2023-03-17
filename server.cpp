@@ -1,53 +1,99 @@
 #include "server.h"
-#include <requesthandler.h>
+#include <QFile>
+#include <QSslKey>
+#include <QSslCertificate>
+
 Server::Server(QObject *parent)
     :QWebSocketServer(QString("Anonymous-chat-server#1"),SslMode::NonSecureMode,parent)
 {
     RequestHandler m_requestHandler;
+    rg=QRandomGenerator::global();
+    /*QFile keyFile("/home/dxxn/ssl/anonymous-chat-privateKey.key");
+    QFile certFile("/home/dxxn/ssl/anonymous-chat-certificate.crt");
+    QByteArray key,cert;
+    if(!keyFile.open(QIODevice::ReadOnly)){
+        qDebug() << "Couldn't Open key File.";
+        qDebug() << "Error: " << keyFile.errorString();
+    }
+    else {
+        key = keyFile.readAll();
+        keyFile.close();
+    }
+    if(!certFile.open(QIODevice::ReadOnly)){
+        qDebug() << "Couldn't Open certificate File.";
+        qDebug() << "Error: " << certFile.errorString();
+    }
+    else {
+        cert = certFile.readAll();
+        certFile.close();
+    }
+    QSslCertificate ssl_cert(cert);
+    QSslKey ssl_key(key,QSsl::Rsa,QSsl::Pem,QSsl::PrivateKey,(QByteArray)"");*/
+
     rest=new QHttpServer();
+    //rest->sslSetup(ssl_cert,ssl_key,QSsl::SslProtocol::SecureProtocols);
     rest->listen(QHostAddress::Any,3232);
 
-    rest->route("/api/members",QHttpServerRequest::Method::Get,[this, &m_requestHandler](const QHttpServerRequest &request){
-        return QtConcurrent::run([this,&m_requestHandler, &request] () {
+    rest->route("/api/members",QHttpServerRequest::Method::Get,[this,&m_requestHandler](const QHttpServerRequest &request){
+        return QtConcurrent::run([this, &request,&m_requestHandler] () {
             if(m_requestHandler.checkRequest(request)){
-                return makeResponse(apiNums::getMembers,QString("Success"));
+                return makeResponse(apiNums::getMembers,QString("true"));
             }
             else{
-                return makeResponse(apiNums::getMembers,QString("Error"));
+                return makeResponse(apiNums::getMembers,QString("false"));
             }
         });
     });
-    const auto[x,y]=std::make_pair(1,2);
-    qDebug() << x;
     rest->route("/api/setNick",QHttpServerRequest::Method::Post,[this,&m_requestHandler](const QHttpServerRequest &request){
-        return QtConcurrent::run([this,&m_requestHandler, &request] () {
+        return QtConcurrent::run([this, &request,&m_requestHandler] () {
             if(m_requestHandler.checkRequest(request)){
                 QString currentNick=m_requestHandler.parseRequest(request);
-                for(auto it=clients.begin();it!=clients.end();++it){
-                    if(it.value()==currentNick){
+                for(auto client=clients.begin();client!=clients.end();++client){
+                    if(client.value()->getNick()==currentNick){
                         return makeResponse(apiNums::postNick,QString("NickAlreadyExist"));
                     }
                 }
-                clients.insert(request.remoteAddress(),currentNick);
-                return makeResponse(apiNums::postNick,QString("Success"));
+                clients[request.remoteAddress()]->setNick(currentNick);
+                return makeResponse(apiNums::postNick,QString("true"));
             }
             else {
-                return makeResponse(apiNums::postNick,QString("Error"));
+                return makeResponse(apiNums::postNick,QString("false"));
             }
         });
     });
-
-    rest->route("/api/getCompanion",QHttpServerRequest::Method::Post,[this, &m_requestHandler](const QHttpServerRequest &request){
-        return QtConcurrent::run([this,&m_requestHandler, &request] () {
+    rest->route("/api/putInQueue",QHttpServerRequest::Method::Post,[this,&m_requestHandler](const QHttpServerRequest &request){
+        return QtConcurrent::run([this,&request,&m_requestHandler] () {
             if(m_requestHandler.checkRequest(request)){
-                QString currentNick=m_requestHandler.parseRequest(request);
-                freeUsers.push_back(currentNick);
-                auto companion=findCompanion();
-                if(companion!=freeUsers.end()){
-                    return makeResponse(apiNums::getCompanion,*companion);
-                }
-                else{
-                    return makeResponse(apiNums::getCompanion,QString("NoCompanion"));
+                freeUsers.push_back(clients[request.remoteAddress()]);
+                clients[request.remoteAddress()]->setPosInQueue(freeUsers.size());
+                return makeResponse(apiNums::putInQueue,QString("true"));
+            }
+            else{
+                return makeResponse(apiNums::putInQueue,QString("false"));
+            }
+        });
+    });
+    rest->route("/api/getCompanion",QHttpServerRequest::Method::Get,[this,&m_requestHandler](const QHttpServerRequest &request){
+        return QtConcurrent::run([this,&request,&m_requestHandler] () {
+            if(m_requestHandler.checkRequest(request)){
+                while(true){
+                    auto companionPos=findCompanion();
+                    if(companionPos!=freeUsers.end()){
+                        Client *companion=*companionPos;
+                        if(companion->isHasCompanion()){
+                            continue;
+                        }
+                        else{
+                            clients[request.remoteAddress()]->setCompanion(companion->getNick(),companion->getSocket());
+                            clients[companion->getAddress()]->setCompanion(clients[request.remoteAddress()]->getNick(),clients[request.remoteAddress()]->getSocket());
+                            //freeUsers.remove(companion->getPosInQueue());
+                            //freeUsers.remove(clients[request.remoteAddress()]->getPosInQueue());
+                            return makeResponse(apiNums::getCompanion,companion->getNick());
+                        }
+                    }
+                    else{
+                        return makeResponse(apiNums::getCompanion,QString("NoCompanion"));
+                    }
                 }
             }
             else{
@@ -61,13 +107,12 @@ Server::Server(QObject *parent)
     else{
         qDebug() << "Error occurred while starting";
     }
-    connect(this,&Server::newConnection,this,&Server::newClient);
+    connect(this,&Server::newConnection,this,&Server::onNewClient);
 }
 
-companionPos Server::findCompanion()
+CompanionPos Server::findCompanion()
 {
-    QRandomGenerator *rg = QRandomGenerator::global();
-    if(freeUsers.size()!=0){
+    if(freeUsers.size()>1){
         qint64 clientNum = rg->bounded(0, freeUsers.size());
         return freeUsers.begin()+clientNum;
     }
@@ -76,16 +121,22 @@ companionPos Server::findCompanion()
     }
 }
 
-void Server::newClient(){
+Server::~Server()
+{
+    rest->deleteLater();
+    socket->deleteLater();
+    delete rg;
+}
+
+void Server::onNewClient(){
     socket = new QWebSocket;
     socket = this->nextPendingConnection();
     connect(socket,&QWebSocket::textMessageReceived,this,&Server::textMessageReceived);
     connect(socket,&QWebSocket::disconnected,this,&Server::disconnectedEvent);
     connect(socket,&QWebSocket::disconnected,socket,&QWebSocket::deleteLater); //Очистка сокета при получении сигнала об отключении клиента
 
-    QString userNick="";
-    clientsNetworkData.insert(socket->peerAddress(),socket);
-    clients.insert(socket->peerAddress(),userNick);
+    сlient = new Client(socket);
+    clients.insert(socket->peerAddress(),сlient);
     qDebug() << "Client connected" << socket->peerAddress();
     ++membersCounter;
 }
@@ -99,20 +150,20 @@ void Server::textMessageReceived(const QString &message)
 QHttpServerResponse Server::makeResponse(qint16 apiNum,QString result)
 {
     if(apiNum==apiNums::getMembers){
-        if(result=="Success"){
+        if(result=="true"){
             QHttpServerResponse response(QString(QString::number(membersCounter)),QHttpServerResponse::StatusCode::Ok);
             response.setHeader("Access-Control-Allow-Origin","*");
             return response;
         }
         else{
-            QHttpServerResponse response(QString("Error"),QHttpServerResponse::StatusCode::BadRequest);
+            QHttpServerResponse response(result,QHttpServerResponse::StatusCode::BadRequest);
             response.setHeader("Access-Control-Allow-Origin","*");
             return response;
         }
     }
     if(apiNum==apiNums::postNick){
-        if(result=="Success"){
-            QHttpServerResponse response(QString("true"),QHttpServerResponse::StatusCode::Ok);
+        if(result=="true"){
+            QHttpServerResponse response(result,QHttpServerResponse::StatusCode::Ok);
             response.setHeader("Access-Control-Allow-Origin","*");
             return response;
         }
@@ -122,14 +173,26 @@ QHttpServerResponse Server::makeResponse(qint16 apiNum,QString result)
             return response;
         }
         else{
-            QHttpServerResponse response(QString("Error"),QHttpServerResponse::StatusCode::BadRequest);
+            QHttpServerResponse response(result,QHttpServerResponse::StatusCode::BadRequest);
+            response.setHeader("Access-Control-Allow-Origin","*");
+            return response;
+        }
+    }
+    if(apiNum==apiNums::putInQueue){
+        if(result=="true"){
+            QHttpServerResponse response(result,QHttpServerResponse::StatusCode::Ok);
+            response.setHeader("Access-Control-Allow-Origin","*");
+            return response;
+        }
+        else{
+            QHttpServerResponse response(result,QHttpServerResponse::StatusCode::BadRequest);
             response.setHeader("Access-Control-Allow-Origin","*");
             return response;
         }
     }
     if(apiNum==apiNums::getCompanion){
         if(result=="Error"){
-            QHttpServerResponse response(QString("Error"),QHttpServerResponse::StatusCode::BadRequest);
+            QHttpServerResponse response(result,QHttpServerResponse::StatusCode::BadRequest);
             response.setHeader("Access-Control-Allow-Origin","*");
             return response;
         }
@@ -143,10 +206,12 @@ QHttpServerResponse Server::makeResponse(qint16 apiNum,QString result)
 
 void Server::disconnectedEvent()
 {
-    QWebSocket *clientSock= qobject_cast<QWebSocket *>(sender());
-    if (clientSock==NULL) {
+    QWebSocket *disconnectedClientSock= qobject_cast<QWebSocket *>(sender());
+    if (disconnectedClientSock==NULL) {
         return;
     }
-    qDebug() << "Client disconnected" << clientSock->peerAddress();
+    clients[disconnectedClientSock->peerAddress()]->~Client();
+    //clients.remove(disconnectedClientSock->peerAddress());
+    qDebug() << "Client disconnected" << disconnectedClientSock->peerAddress();
      --membersCounter;
 }
