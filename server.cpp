@@ -64,8 +64,10 @@ Server::Server(QObject *parent)
     rest->route("/api/putInQueue",QHttpServerRequest::Method::Post,[this,&m_requestHandler](const QHttpServerRequest &request){
         return QtConcurrent::run([this,&request,&m_requestHandler] () {
             if(m_requestHandler.checkRequest(request)){
-                freeUsers.push_back(clients[request.remoteAddress()]);
                 clients[request.remoteAddress()]->setPosInQueue(freeUsers.size());
+                mt.lock();
+                freeUsers.push_back(clients[request.remoteAddress()]);
+                mt.unlock();
                 return makeResponse(apiNums::putInQueue,QString("true"));
             }
             else{
@@ -84,10 +86,12 @@ Server::Server(QObject *parent)
                             continue;
                         }
                         else{
-                            clients[request.remoteAddress()]->setCompanion(companion->getNick(),companion->getSocket());
-                            clients[companion->getAddress()]->setCompanion(clients[request.remoteAddress()]->getNick(),clients[request.remoteAddress()]->getSocket());
-                            //freeUsers.remove(companion->getPosInQueue());
-                            //freeUsers.remove(clients[request.remoteAddress()]->getPosInQueue());
+                            clients[request.remoteAddress()]->setCompanion(companion);
+                            clients[companion->getAddress()]->setCompanion(clients[request.remoteAddress()]);
+                            mt.lock();
+                            //freeUsers.remove(companion->getPosInQueue());  Commented while testing at localhost cuz in hash map(Clients) key - it's address.What means that companion's address is the same with client's
+                            freeUsers.remove(clients[request.remoteAddress()]->getPosInQueue());
+                            mt.unlock();
                             return makeResponse(apiNums::getCompanion,companion->getNick());
                         }
                     }
@@ -105,7 +109,8 @@ Server::Server(QObject *parent)
         qDebug() << "Server started";
     }
     else{
-        qDebug() << "Error occurred while starting";
+        qDebug() << "Error occurred while starting:";
+        qDebug() << this->errorString();
     }
     connect(this,&Server::newConnection,this,&Server::onNewClient);
 }
@@ -136,9 +141,10 @@ void Server::onNewClient(){
     connect(socket,&QWebSocket::disconnected,socket,&QWebSocket::deleteLater); //Очистка сокета при получении сигнала об отключении клиента
 
     сlient = new Client(socket);
+    mt.lock();
     clients.insert(socket->peerAddress(),сlient);
+    mt.unlock();
     qDebug() << "Client connected" << socket->peerAddress();
-    ++membersCounter;
 }
 
 void Server::textMessageReceived(const QString &message)
@@ -151,7 +157,7 @@ QHttpServerResponse Server::makeResponse(qint16 apiNum,QString result)
 {
     if(apiNum==apiNums::getMembers){
         if(result=="true"){
-            QHttpServerResponse response(QString(QString::number(membersCounter)),QHttpServerResponse::StatusCode::Ok);
+            QHttpServerResponse response(QString(QString::number(clients.size())),QHttpServerResponse::StatusCode::Ok);
             response.setHeader("Access-Control-Allow-Origin","*");
             return response;
         }
@@ -211,7 +217,6 @@ void Server::disconnectedEvent()
         return;
     }
     clients[disconnectedClientSock->peerAddress()]->~Client();
-    //clients.remove(disconnectedClientSock->peerAddress());
+    clients.remove(disconnectedClientSock->peerAddress());
     qDebug() << "Client disconnected" << disconnectedClientSock->peerAddress();
-     --membersCounter;
 }

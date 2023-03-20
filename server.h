@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QRandomGenerator>
 #include <QtConcurrent>
+#include <QMutex>
 #include <requesthandler.h>
 
 using CompanionPos = QList<Client*>::Iterator;
@@ -30,15 +31,13 @@ private:
         postNick = 3,
         putInQueue = 4,
     };
+    QMutex mt;
     Client *сlient;
     QHttpServer *rest;
     QWebSocket *socket;
     QHash<QHostAddress,Client*>clients;
-    QVector<QHash<QWebSocket*,QWebSocket*>>currentDialogs;
     QNetworkAccessManager *m_networkAccessManager;
     QList<Client*>freeUsers;
-    QList<Client*>beasyUsers;
-    size_t membersCounter=0;
     QRandomGenerator *rg;
     QHttpServerResponse makeResponse(qint16 apiNum, QString result);
 };
