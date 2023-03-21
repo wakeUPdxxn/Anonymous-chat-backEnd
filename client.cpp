@@ -19,9 +19,14 @@ QWebSocket *Client::getSocket(){ return clientSocket; }
 
 QHostAddress Client::getAddress(){ return clientAddress; }
 
+Client *Client::getCompanion(){ return companion; }
+
 void Client::setNick(const QString &newNick){ clientNickName=newNick; }
 
-void Client::setCompanion(Client *currentCompanion){ this->companion=currentCompanion; }
+void Client::setCompanion(Client *currentCompanion){
+    this->companion=currentCompanion;
+    currentCompanion=nullptr;
+}
 
 void Client::setPosInQueue(const size_t pos){ posInQueue=pos; }
 

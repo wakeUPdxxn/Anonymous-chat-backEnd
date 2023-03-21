@@ -10,6 +10,7 @@ public:
     QString getNick();
     QWebSocket* getSocket();
     QHostAddress getAddress();
+    Client* getCompanion();
     void setNick(const QString& newNick);
     void setPosInQueue(const size_t pos);
     void setCompanion(Client *currentCompanion);
