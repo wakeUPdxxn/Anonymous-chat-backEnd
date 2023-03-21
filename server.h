@@ -10,6 +10,7 @@
 #include <QRandomGenerator>
 #include <QtConcurrent>
 #include <QMutex>
+#include <QMutexLocker>
 #include <requesthandler.h>
 
 using CompanionPos = QList<Client*>::Iterator;
@@ -18,7 +19,7 @@ class Server:public QWebSocketServer
 {
 public:
     explicit Server(QObject *parent = nullptr);
-    CompanionPos findCompanion();
+    Client *findCompanion();
     ~Server();
 public slots:
     void onNewClient();

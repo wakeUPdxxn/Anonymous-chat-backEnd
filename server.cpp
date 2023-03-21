@@ -2,6 +2,7 @@
 #include <QFile>
 #include <QSslKey>
 #include <QSslCertificate>
+#include <QTime>
 
 Server::Server(QObject *parent)
     :QWebSocketServer(QString("Anonymous-chat-server#1"),SslMode::NonSecureMode,parent)
@@ -78,30 +79,42 @@ Server::Server(QObject *parent)
     rest->route("/api/getCompanion",QHttpServerRequest::Method::Get,[this,&m_requestHandler](const QHttpServerRequest &request){
         return QtConcurrent::run([this,&request,&m_requestHandler] () {
             if(m_requestHandler.checkRequest(request)){
+                Client *companion;
+                QTime start=QTime::currentTime();
+                QTime end=QTime::currentTime();
                 while(true){
-                    auto companionPos=findCompanion();
-                    if(companionPos!=freeUsers.end()){
-                        Client *companion=*companionPos;
-                        if(companion->isHasCompanion()){
+                    companion=findCompanion();
+                    if(companion!=nullptr && (start.msecsTo(end)<200)){
+                        while(companion->getNick()==clients[request.remoteAddress()]->getNick()){
+                            if(start.msecsTo(end)>50){
+                                return makeResponse(apiNums::getCompanion,QString("NoCompanion"));
+                            }
+                            else {
+                                companion=findCompanion();
+                                end=QTime::currentTime();
+                            }
+                        }
+                        if(companion->isHasCompanion() && companion->getCompanion()->getAddress()!=request.remoteAddress()){
+                            end=QTime::currentTime();
                             continue;
                         }
-                        else{
+                        else {
+                            QMutexLocker<QMutex>mlk(&mt);
                             clients[request.remoteAddress()]->setCompanion(companion);
                             clients[companion->getAddress()]->setCompanion(clients[request.remoteAddress()]);
-                            mt.lock();
-                            //freeUsers.remove(companion->getPosInQueue());  Commented while testing at localhost cuz in hash map(Clients) key - it's address.What means that companion's address is the same with client's
+                            freeUsers.remove(companion->getPosInQueue());
                             freeUsers.remove(clients[request.remoteAddress()]->getPosInQueue());
-                            mt.unlock();
                             return makeResponse(apiNums::getCompanion,companion->getNick());
                         }
                     }
-                    else{
+                    else {
                         return makeResponse(apiNums::getCompanion,QString("NoCompanion"));
                     }
                 }
             }
-            else{
-                return makeResponse(apiNums::getCompanion,QString("Error")); }
+            else {
+                return makeResponse(apiNums::getCompanion,QString("Error"));
+            }
         });
     });
 
@@ -115,14 +128,14 @@ Server::Server(QObject *parent)
     connect(this,&Server::newConnection,this,&Server::onNewClient);
 }
 
-CompanionPos Server::findCompanion()
+Client* Server::findCompanion()
 {
     if(freeUsers.size()>1){
-        qint64 clientNum = rg->bounded(0, freeUsers.size());
-        return freeUsers.begin()+clientNum;
+        qint64 clientNum = rg->bounded(0, freeUsers.size()-1);
+        return freeUsers.at(clientNum);
     }
     else{
-        return freeUsers.end();
+        return nullptr;
     }
 }
 
